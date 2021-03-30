@@ -34,8 +34,12 @@ import java.security.cert.X509Certificate;
 import java.util.Collections;
 import java.util.Set;
 
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import javax.xml.xpath.XPathException;
 
+import org.apache.xml.security.algorithms.JCEMapper;
+import org.apache.xml.security.algorithms.SignatureAlgorithm;
 import org.forgerock.openam.utils.StringUtils;
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
@@ -85,14 +89,14 @@ public final class FMSigProvider implements SigProvider {
 	    Canonicalizer.ALGO_ID_C14N_EXCL_OMIT_COMMENTS);
 	transformAlg = SystemPropertiesManager.get(
 	    SAML2Constants.TRANSFORM_ALGORITHM,
-	    Transforms.TRANSFORM_C14N_EXCL_OMIT_COMMENTS); 
+	    Transforms.TRANSFORM_C14N_EXCL_OMIT_COMMENTS);
 	sigAlg = SystemPropertiesManager.get(
-	    SAML2Constants.XMLSIG_ALGORITHM); 
+	    SAML2Constants.XMLSIG_ALGORITHM);
 	digestAlg = SystemPropertiesManager.get(
 	    SAML2Constants.DIGEST_ALGORITHM,
             Constants.ALGO_ID_DIGEST_SHA1);
-	
-	String valCert = 
+
+	String valCert =
 	    SystemPropertiesManager.get(
 		"com.sun.identity.saml.checkcert",
 		"on");
@@ -101,13 +105,13 @@ public final class FMSigProvider implements SigProvider {
 	    checkCert = false;
 	}
     }
-    
+
     /**
      * Default Constructor
      */
     public FMSigProvider() {
     }
-    
+
     /**
      * Sign the xml document node whose identifying attribute value
      * is as supplied, using enveloped signatures and use exclusive xml
@@ -126,7 +130,7 @@ public final class FMSigProvider implements SigProvider {
      */
     public Element sign(String xmlString, String idValue, PrivateKey privateKey, X509Certificate cert)
             throws SAML2Exception {
-	
+
 	    String classMethod = "FMSigProvider.sign: ";
         if (StringUtils.isEmpty(xmlString)) {
             SAML2SDKUtils.debug.error(classMethod + "The xml to sign was empty.");
@@ -139,7 +143,7 @@ public final class FMSigProvider implements SigProvider {
 	    if (privateKey == null) {
             SAML2SDKUtils.debug.error(classMethod + "The private key was null.");
             throw new SAML2Exception(SAML2SDKUtils.BUNDLE_NAME, "nullInputMessage", new String[]{"private key"});
-        }                                                 
+        }
 	    Document doc = XMLUtils.toDOMDocument(xmlString, SAML2SDKUtils.debug);
         if (doc == null) {
             throw new SAML2Exception(SAML2SDKUtils.bundle.getString("errorObtainingElement"));
@@ -153,24 +157,12 @@ public final class FMSigProvider implements SigProvider {
 	}
     root.setIdAttribute(SAML2Constants.ID, true);
 	try {
-	    if ((sigAlg == null) || (sigAlg.trim().length() == 0)) {
-	       if (privateKey.getAlgorithm().equalsIgnoreCase(
-			SAML2Constants.DSA)) {
-	           sigAlg = 
-	               XMLSignature.ALGO_ID_SIGNATURE_DSA;
-	       } else { 
-	           if (privateKey.getAlgorithm().equalsIgnoreCase(
-			SAML2Constants.RSA)) {
-	               sigAlg = 
-	                   XMLSignature.ALGO_ID_SIGNATURE_RSA_SHA1;
-                   }
-	       }  
-	    }        
+        evaluateSigAlg(privateKey, cert);
 	    sig = new XMLSignature(
 		doc, "", sigAlg, c14nMethod);
 	} catch (XMLSecurityException xse2) {
 	    throw new SAML2Exception(xse2);
-	}	    
+	}
 	Node firstChild = root.getFirstChild();
 	while (firstChild != null &&
 	       (firstChild.getLocalName() == null ||
@@ -182,24 +174,24 @@ public final class FMSigProvider implements SigProvider {
 	    nextSibling = firstChild.getNextSibling();
 	}
 	if (nextSibling == null) {
-	    root.appendChild(sig.getElement());  
+	    root.appendChild(sig.getElement());
 	} else {
 	    root.insertBefore(sig.getElement(), nextSibling);
 	}
-	sig.getSignedInfo().addResourceResolver(   
-	    new com.sun.identity.saml.xmlsig.OfflineResolver()); 
+	sig.getSignedInfo().addResourceResolver(
+	    new com.sun.identity.saml.xmlsig.OfflineResolver());
 	Transforms transforms = new Transforms(doc);
 	try {
 	    transforms.addTransform(
 		Transforms.TRANSFORM_ENVELOPED_SIGNATURE);
 	} catch (TransformationException te1) {
 	    throw new SAML2Exception(te1);
-	}	    
+	}
 	try {
 	    transforms.addTransform(transformAlg);
 	} catch (TransformationException te2) {
 	    throw new SAML2Exception(te2);
-	}	    
+	}
 	String ref = "#" + idValue;
 	try {
 	    sig.addDocument(
@@ -208,25 +200,25 @@ public final class FMSigProvider implements SigProvider {
 		digestAlg);
 	} catch (XMLSignatureException sige1) {
 	    throw new SAML2Exception(sige1);
-	}	    
+	}
 	if (cert != null) {
 	    try {
 		sig.addKeyInfo(cert);
 	    } catch (XMLSecurityException xse3) {
 		throw new SAML2Exception(xse3);
-	    }		
+	    }
 	}
 	try {
 	    sig.sign(privateKey);
 	} catch (XMLSignatureException sige2) {
 	    throw new SAML2Exception(sige2);
-	}	    
+	}
 	if (SAML2SDKUtils.debug.messageEnabled()) {
 	    SAML2SDKUtils.debug.message(
 		classMethod +
 		"Signing is successful.");
 	}
-        return sig.getElement();   
+        return sig.getElement();
     }
 
     public boolean verify(
@@ -358,5 +350,167 @@ public final class FMSigProvider implements SigProvider {
         }
 
         return false;
+    }
+
+    /**
+     * Set the {@code sigAlg} from most appropriate source.
+     *
+     * <p>The algorithm gets initialized with a default value from the system properties but might be dynamically
+     * overwritten based on the actual used {@link X509Certificate certificate} or {@link PrivateKey private key}.</p>
+     *
+     * Sources are (in that order):
+     * <ul>
+     *     <li>{@link X509Certificate#getSigAlgName()}</li>
+     *     <li>{@link PrivateKey#getAlgorithm()}</li>
+     *     <li>{@link this#sigAlg}</li>
+     * </ul>
+     *
+     * @param privateKey  to get the sig alg from.
+     * @param certificate to get the sig alg from.
+     */
+    private static void evaluateSigAlg(PrivateKey privateKey, @Nullable X509Certificate certificate) {
+
+        if (
+            certificate != null
+                && certificate.getSigAlgName() != null
+                && !certificate.getSigAlgName().isEmpty()
+                && certificate.getSigAlgName().trim().length() > 0
+        ) {
+            String sigAlgURIFromSigAlgName = getSigAlgURIFromSigAlgJCEName(certificate.getSigAlgName());
+            if (!sigAlgURIFromSigAlgName.isEmpty()) {
+                sigAlg = sigAlgURIFromSigAlgName;
+            }
+        }
+
+        if (sigAlg == null || sigAlg.trim().length() == 0) {
+            // Defaults taken from https://docs.oracle.com/javase/8/docs/technotes/tools/unix/keytool.html#CHDJDADB
+            if (privateKey.getAlgorithm().equalsIgnoreCase(SAML2Constants.DSA)) {
+                sigAlg = XMLSignature.ALGO_ID_SIGNATURE_DSA_SHA256;
+            } else if (privateKey.getAlgorithm().equalsIgnoreCase(SAML2Constants.RSA)) {
+                sigAlg = XMLSignature.ALGO_ID_SIGNATURE_RSA_SHA256;
+            } else if (privateKey.getAlgorithm().equalsIgnoreCase(SAML2Constants.EC)) {
+                sigAlg = XMLSignature.ALGO_ID_SIGNATURE_ECDSA_SHA256;
+            } else {
+                SAML2SDKUtils.debug.message(
+                    "Could not find signature algorithm for private key algorithm '{}'.", privateKey.getAlgorithm()
+                );
+            }
+        }
+
+        SAML2SDKUtils.debug.message("Using signature algorithm URI '{}'.", sigAlg);
+    }
+
+    /**
+     * Returns the URI of the signature algorithm for the provided jce name.
+     *
+     * Only supports default algorithms.
+     *
+     * @param sigAlgJCEName the name.
+     * @return the URI.
+     * @see SignatureAlgorithm#registerDefaultAlgorithms()
+     * @see JCEMapper#registerDefaultAlgorithms()
+     */
+    @Nonnull
+    private static String getSigAlgURIFromSigAlgJCEName(@Nonnull String sigAlgJCEName) {
+
+        String sigAlgURI = "";
+
+        switch (sigAlgJCEName) {
+            case "SHA1withDSA":
+                sigAlgURI = XMLSignature.ALGO_ID_SIGNATURE_DSA;
+                break;
+            case "SHA256withDSA":
+                sigAlgURI = XMLSignature.ALGO_ID_SIGNATURE_DSA_SHA256;
+                break;
+            case "SHA1withRSA":
+                sigAlgURI = XMLSignature.ALGO_ID_SIGNATURE_RSA_SHA1;
+                break;
+            case "HmacSHA1":
+                sigAlgURI = XMLSignature.ALGO_ID_MAC_HMAC_SHA1;
+                break;
+            case "RIPEMD160withRSA":
+                sigAlgURI = XMLSignature.ALGO_ID_SIGNATURE_RSA_RIPEMD160;
+                break;
+            case "SHA224withRSA":
+                sigAlgURI = XMLSignature.ALGO_ID_SIGNATURE_RSA_SHA224;
+                break;
+            case "SHA256withRSA":
+                sigAlgURI = XMLSignature.ALGO_ID_SIGNATURE_RSA_SHA256;
+                break;
+            case "SHA384withRSA":
+                sigAlgURI = XMLSignature.ALGO_ID_SIGNATURE_RSA_SHA384;
+                break;
+            case "SHA512withRSA":
+                sigAlgURI = XMLSignature.ALGO_ID_SIGNATURE_RSA_SHA512;
+                break;
+            case "SHA1withRSAandMGF1":
+                sigAlgURI = XMLSignature.ALGO_ID_SIGNATURE_RSA_SHA1_MGF1;
+                break;
+            case "SHA224withRSAandMGF1":
+                sigAlgURI = XMLSignature.ALGO_ID_SIGNATURE_RSA_SHA224_MGF1;
+                break;
+            case "SHA256withRSAandMGF1":
+                sigAlgURI = XMLSignature.ALGO_ID_SIGNATURE_RSA_SHA256_MGF1;
+                break;
+            case "SHA384withRSAandMGF1":
+                sigAlgURI = XMLSignature.ALGO_ID_SIGNATURE_RSA_SHA384_MGF1;
+                break;
+            case "SHA512withRSAandMGF1":
+                sigAlgURI = XMLSignature.ALGO_ID_SIGNATURE_RSA_SHA512_MGF1;
+                break;
+            case "SHA3-224withRSAandMGF1":
+                sigAlgURI = XMLSignature.ALGO_ID_SIGNATURE_RSA_SHA3_224_MGF1;
+                break;
+            case "SHA3-256withRSAandMGF1":
+                sigAlgURI = XMLSignature.ALGO_ID_SIGNATURE_RSA_SHA3_256_MGF1;
+                break;
+            case "SHA3-384withRSAandMGF1":
+                sigAlgURI = XMLSignature.ALGO_ID_SIGNATURE_RSA_SHA3_384_MGF1;
+                break;
+            case "SHA3-512withRSAandMGF1":
+                sigAlgURI = XMLSignature.ALGO_ID_SIGNATURE_RSA_SHA3_512_MGF1;
+                break;
+            case "SHA1withECDSA":
+                sigAlgURI = XMLSignature.ALGO_ID_SIGNATURE_ECDSA_SHA1;
+                break;
+            case "SHA224withECDSA":
+                sigAlgURI = XMLSignature.ALGO_ID_SIGNATURE_ECDSA_SHA224;
+                break;
+            case "SHA256withECDSA":
+                sigAlgURI = XMLSignature.ALGO_ID_SIGNATURE_ECDSA_SHA256;
+                break;
+            case "SHA384withECDSA":
+                sigAlgURI = XMLSignature.ALGO_ID_SIGNATURE_ECDSA_SHA384;
+                break;
+            case "SHA512withECDSA":
+                sigAlgURI = XMLSignature.ALGO_ID_SIGNATURE_ECDSA_SHA512;
+                break;
+            case "RIPEMD160withECDSA":
+                sigAlgURI = XMLSignature.ALGO_ID_SIGNATURE_ECDSA_RIPEMD160;
+                break;
+            case "HMACRIPEMD160":
+                sigAlgURI = XMLSignature.ALGO_ID_MAC_HMAC_RIPEMD160;
+                break;
+            case "HmacSHA224":
+                sigAlgURI = XMLSignature.ALGO_ID_MAC_HMAC_SHA224;
+                break;
+            case "HmacSHA256":
+                sigAlgURI = XMLSignature.ALGO_ID_MAC_HMAC_SHA256;
+                break;
+            case "HmacSHA384":
+                sigAlgURI = XMLSignature.ALGO_ID_MAC_HMAC_SHA384;
+                break;
+            case "HmacSHA512":
+                sigAlgURI = XMLSignature.ALGO_ID_MAC_HMAC_SHA512;
+                break;
+            default:
+                SAML2SDKUtils.debug.error(
+                    "Unsupported jce signature algorithm name '{}' provided. No URI will be provided.",
+                    sigAlgJCEName
+                );
+                break;
+        }
+
+        return sigAlgURI;
     }
 }
