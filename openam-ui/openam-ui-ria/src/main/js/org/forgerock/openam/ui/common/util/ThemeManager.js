@@ -171,7 +171,8 @@ define([
                 hasThemeChanged = hasThemeNameChanged || hasAdminThemeFlagChanged,
                 defaultTheme,
                 theme,
-                stylesheets;
+                stylesheets,
+                adminStyles = Constants.DEFAULT_STYLESHEETS;
 
             if (!hasThemeChanged) {
                 return $.Deferred().resolve(Configuration.globalData.theme);
@@ -184,8 +185,11 @@ define([
             theme = makeUrlsRelativeToEntryPoint(theme);
 
             // We don't apply themes to the admin interface because it would take significant effort to make the UI
-            // themeable.
-            stylesheets = isAdminTheme ? Constants.DEFAULT_STYLESHEETS : theme.stylesheets;
+            // themeable. However we allow to add custom stylesheets to change some aspects of the admin UI.
+            if ("adminStylesheets" in theme && theme.adminStylesheets.length > 0) {
+                adminStyles = adminStyles.concat(theme.adminStylesheets);
+            }
+            stylesheets = isAdminTheme ? adminStyles : theme.stylesheets;
 
             applyThemeToPage(theme.path, theme.icon, stylesheets);
             Configuration.globalData.theme = theme;
