@@ -357,8 +357,8 @@ public class TypedIDPAttributeMapper extends DefaultLibraryIDPAttributeMapper {
      * <p>
      * Does not change local attribute values.
      * <p>
-     * <strong>The key parsing is a very simplified and "dumb" implementation. It allows the datatype to be in any
-     * order and will overwrite values if multiples are present.</strong>
+     * <strong>The key parsing is a very simplified and "dumb" implementation. Always assumes the NameFormatURI is
+     * provided when a datatype is set.</strong>
      *
      * @param mappings with local attributes already resolved.
      * @return the list of saml attributes.

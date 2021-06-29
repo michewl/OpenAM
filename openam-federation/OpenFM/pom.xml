@@ -104,8 +104,8 @@
 		    <groupId>org.glassfish.metro</groupId>
 		    <artifactId>wsit-impl</artifactId>
 		</dependency>
-		
-    
+
+
         <dependency>
             <groupId>org.openidentityplatform.openam</groupId>
             <artifactId>openam-core</artifactId>
@@ -125,7 +125,7 @@
             <groupId>org.openidentityplatform.openam</groupId>
             <artifactId>openam-federation-library</artifactId>
         </dependency>
-        
+
 
         <dependency>
             <groupId>javax.servlet</groupId>
@@ -143,7 +143,7 @@
             <artifactId>testng</artifactId>
             <scope>test</scope>
         </dependency>
-  
+
         <dependency>
             <groupId>org.easytesting</groupId>
             <artifactId>fest-assert</artifactId>
@@ -152,6 +152,16 @@
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.powermock</groupId>
+            <artifactId>powermock-module-testng</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.powermock</groupId>
+            <artifactId>powermock-api-mockito2</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
